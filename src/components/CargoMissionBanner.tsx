@@ -1,11 +1,11 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { PAYLOAD_MISSIONS } from '../data/cargoMissions';
 import { STATIONS } from '../data/stations';
-import { useLabStore } from '../store/useLabStore';
+import { useLabStore, selectCargoState } from '../store/useLabStore';
 
 export const CargoMissionBanner: React.FC = () => {
-  const activeCargoMissionId = useLabStore((s) => s.activeCargoMissionId);
-  const cargoPhase = useLabStore((s) => s.cargoPhase);
+  const { activeCargoMissionId, cargoPhase } = useLabStore(useShallow(selectCargoState));
   const flightPhase = useLabStore((s) => s.flightPhase);
   const lang = useLabStore((s) => s.lang);
   const engine = useLabStore((s) => s.engine);

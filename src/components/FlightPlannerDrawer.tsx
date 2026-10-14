@@ -1,17 +1,22 @@
 import React from 'react';
 import { FastForward, Navigation, Repeat, Trash2 } from 'lucide-react';
-import { useLabStore } from '../store/useLabStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useLabStore, selectPlannerState } from '../store/useLabStore';
 
 export const FlightPlannerDrawer: React.FC = () => {
   const lang = useLabStore((s) => s.lang);
   const engine = useLabStore((s) => s.engine);
-  const plannerDrawerOpen = useLabStore((s) => s.plannerDrawerOpen);
-  const setPlannerDrawerOpen = useLabStore((s) => s.setPlannerDrawerOpen);
-  const waypoints = useLabStore((s) => s.flightPlanWaypoints);
-  const flightPlanActive = useLabStore((s) => s.flightPlanActive);
-  const flightPlanLoop = useLabStore((s) => s.flightPlanLoop);
-  const activeWaypointIdx = useLabStore((s) => s.activeWaypointIdx);
 
+  const {
+    plannerDrawerOpen,
+    flightPlanWaypoints: waypoints,
+    flightPlanActive,
+    flightPlanLoop,
+    activeWaypointIdx,
+  } = useLabStore(useShallow(selectPlannerState));
+
+  // Actions (stable refs)
+  const setPlannerDrawerOpen = useLabStore((s) => s.setPlannerDrawerOpen);
   const updateFlightPlanWaypoint = useLabStore((s) => s.updateFlightPlanWaypoint);
   const removeFlightPlanWaypoint = useLabStore((s) => s.removeFlightPlanWaypoint);
   const clearFlightPlan = useLabStore((s) => s.clearFlightPlan);

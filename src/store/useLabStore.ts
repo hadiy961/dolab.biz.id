@@ -18,6 +18,18 @@ import {
   PRESET_FLIGHT_PLANS,
 } from '../data/flightAndWeather';
 import { audioSynth } from '../services/audioSynth';
+import { AUDIO_CHORDS, AUDIO_DURATIONS, AUDIO_NOTES } from '../constants/audio';
+import {
+  AI_HELIX_OVERCLOCK_THRESHOLD,
+  BIODOME_COLORS,
+  BIODOME_EMISSIVES,
+  BIODOME_EMISSIVE_INTENSITY_BRIGHT,
+  BIODOME_EMISSIVE_INTENSITY_DIM,
+  MAX_FLIGHT_PLAN_WAYPOINTS,
+  TOAST_DURATION_MS,
+  WAYPOINT_AUDIO_BASE_FREQ,
+  WAYPOINT_AUDIO_STEP,
+} from '../constants/gameplay';
 
 export interface EngineBridge {
   toggleLandingTakeoff: () => void;
@@ -43,14 +55,40 @@ export interface EngineBridge {
   syncFlightPlanVisuals: () => void;
 }
 
+// --- Synced flight fields (updated by engine every frame) ---
+export type FlightStatusFields = Pick<
+  LabStoreState,
+  | 'activeStationId'
+  | 'targetStationId'
+  | 'flightPhase'
+  | 'autopilot'
+  | 'cameraMode'
+  | 'atmosphereMode'
+  | 'autoSpotlightActive'
+  | 'guidedTourActive'
+  | 'ringCourseActive'
+  | 'ringGateLabel'
+  | 'wingmanSwarmActive'
+  | 'flightProfile'
+  | 'activeLivery'
+  | 'activeCargoMissionId'
+  | 'cargoPhase'
+  | 'flightPlanActive'
+  | 'activeWaypointIdx'
+>;
+
 export interface LabStoreState {
+  // --- Session ---
   lang: Language;
   bootProgress: number;
   bootCompleted: boolean;
-  drawerCollapsed: boolean;
-  toastMessage: string | null;
   audioEnabled: boolean;
 
+  // --- UI ---
+  drawerCollapsed: boolean;
+  toastMessage: string | null;
+
+  // --- Flight ---
   activeStationId: number;
   targetStationId: number;
   flightPhase: FlightPhase;
@@ -66,10 +104,12 @@ export interface LabStoreState {
   ringGateLabel: string;
   visitedIslands: number[];
 
+  // --- Cargo ---
   activeCargoMissionId: string | null;
   cargoPhase: CargoMissionPhase;
   completedCargoIds: string[];
 
+  // --- Flight Planner ---
   plannerMode: boolean;
   plannerDrawerOpen: boolean;
   flightPlanWaypoints: FlightPlanWaypoint[];
@@ -77,6 +117,7 @@ export interface LabStoreState {
   flightPlanLoop: boolean;
   activeWaypointIdx: number;
 
+  // --- Portfolio / Island content ---
   activeProjectFilter: ProjectCategory;
   selectedTechSkillIdx: number;
   selectedPublicationIdx: number;
@@ -84,46 +125,29 @@ export interface LabStoreState {
   commLogs: CommTransmissionLog[];
   islandState: IslandInteractiveState;
 
+  // --- Modals ---
   activeProjectModalIdx: number | null;
   terminalModalOpen: boolean;
   hangarModalOpen: boolean;
   snapshotDataUrl: string | null;
 
+  // --- Engine bridge ---
   engine: EngineBridge | null;
   setEngine: (engine: EngineBridge | null) => void;
 
+  // --- Session actions ---
   setBootState: (progress: number, completed?: boolean) => void;
   toggleLang: () => void;
   toggleDrawer: () => void;
   showToast: (msg: string) => void;
   toggleAudio: () => void;
-  syncFlightStatus: (
-    partial: Partial<
-      Pick<
-        LabStoreState,
-        | 'activeStationId'
-        | 'targetStationId'
-        | 'flightPhase'
-        | 'autopilot'
-        | 'cameraMode'
-        | 'atmosphereMode'
-        | 'autoSpotlightActive'
-        | 'guidedTourActive'
-        | 'ringCourseActive'
-        | 'ringGateLabel'
-        | 'wingmanSwarmActive'
-        | 'flightProfile'
-        | 'activeLivery'
-        | 'activeCargoMissionId'
-        | 'cargoPhase'
-        | 'flightPlanActive'
-        | 'activeWaypointIdx'
-      >
-    >
-  ) => void;
+
+  // --- Flight sync (called by engine) ---
+  syncFlightStatus: (partial: Partial<FlightStatusFields>) => void;
   markIslandVisited: (stationId: number) => void;
   markCargoDelivered: (missionId: string) => void;
 
+  // --- Flight Planner actions ---
   setPlannerMode: (enabled?: boolean) => void;
   setPlannerDrawerOpen: (open?: boolean) => void;
   addFlightPlanWaypoint: (wp: Omit<FlightPlanWaypoint, 'id'>) => void;
@@ -136,6 +160,7 @@ export interface LabStoreState {
   toggleFlightPlanLoop: () => void;
   loadPresetFlightPlan: (preset: FlightPlanPresetKey) => void;
 
+  // --- Portfolio / content actions ---
   setProjectFilter: (cat: ProjectCategory) => void;
   selectTechSkill: (idx: number) => void;
   selectPublication: (idx: number) => void;
@@ -146,6 +171,8 @@ export interface LabStoreState {
     value: IslandInteractiveState[K],
     toastMsg?: string
   ) => void;
+
+  // --- Modal actions ---
   openProjectModal: (idx: number) => void;
   closeProjectModal: () => void;
   setTerminalModalOpen: (open: boolean) => void;
@@ -153,17 +180,22 @@ export interface LabStoreState {
   setSnapshotDataUrl: (url: string | null) => void;
 }
 
+// Module-level singletons (not in React state — side-effect-only)
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let wpCounter = 1;
 
 export const useLabStore = create<LabStoreState>((set, get) => ({
+  // ── Session ──────────────────────────────────────────────────────────────
   lang: 'id',
   bootProgress: 0,
   bootCompleted: false,
-  drawerCollapsed: false,
-  toastMessage: null,
   audioEnabled: false,
 
+  // ── UI ───────────────────────────────────────────────────────────────────
+  drawerCollapsed: false,
+  toastMessage: null,
+
+  // ── Flight ───────────────────────────────────────────────────────────────
   activeStationId: 0,
   targetStationId: 0,
   flightPhase: 'LANDED',
@@ -179,10 +211,12 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
   ringGateLabel: 'RING TRIAL',
   visitedIslands: [0],
 
+  // ── Cargo ────────────────────────────────────────────────────────────────
   activeCargoMissionId: null,
   cargoPhase: 'IDLE',
   completedCargoIds: [],
 
+  // ── Flight Planner ────────────────────────────────────────────────────────
   plannerMode: false,
   plannerDrawerOpen: false,
   flightPlanWaypoints: [
@@ -218,6 +252,7 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
   flightPlanLoop: true,
   activeWaypointIdx: 0,
 
+  // ── Portfolio / Island content ────────────────────────────────────────────
   activeProjectFilter: 'ALL',
   selectedTechSkillIdx: 0,
   selectedPublicationIdx: 0,
@@ -244,19 +279,22 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
     uplinkBeam: false,
   },
 
+  // ── Modals ────────────────────────────────────────────────────────────────
   activeProjectModalIdx: null,
   terminalModalOpen: false,
   hangarModalOpen: false,
   snapshotDataUrl: null,
 
+  // ── Engine bridge ─────────────────────────────────────────────────────────
   engine: null,
   setEngine: (engine) => set({ engine }),
+
+  // ── Session actions ───────────────────────────────────────────────────────
 
   setBootState: (bootProgress, bootCompleted) =>
     set((s) => ({
       bootProgress,
-      bootCompleted:
-        bootCompleted !== undefined ? bootCompleted : s.bootCompleted,
+      bootCompleted: bootCompleted !== undefined ? bootCompleted : s.bootCompleted,
     })),
 
   toggleLang: () => {
@@ -272,7 +310,7 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
   showToast: (msg: string) => {
     if (toastTimer) clearTimeout(toastTimer);
     set({ toastMessage: msg });
-    toastTimer = setTimeout(() => set({ toastMessage: null }), 2800);
+    toastTimer = setTimeout(() => set({ toastMessage: null }), TOAST_DURATION_MS);
   },
 
   toggleAudio: () => {
@@ -281,7 +319,13 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
     get().showToast(enabled ? 'AVIONICS AUDIO: ON' : 'AVIONICS AUDIO: MUTED');
   },
 
-  syncFlightStatus: (partial) => set((state) => ({ ...state, ...partial })),
+  // ── Flight sync ───────────────────────────────────────────────────────────
+
+  /**
+   * Called by the engine every animation frame to push flight telemetry into the
+   * store. Only the provided fields are updated — no full-state spread needed.
+   */
+  syncFlightStatus: (partial) => set(partial),
 
   markIslandVisited: (stationId) => {
     const current = get().visitedIslands;
@@ -290,23 +334,19 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
       set({ visitedIslands: updated });
       if (updated.length === STATIONS.length) {
         get().showToast('ARCHIPELAGO MASTER: ALL 10 FLOATING ISLANDS EXPLORED!');
-        audioSynth.playBeep(1046.5, 0.2);
+        audioSynth.playBeep(AUDIO_NOTES.C6, AUDIO_DURATIONS.TINY * 5);
       }
     }
   },
 
   markCargoDelivered: (missionId) => {
     const current = get().completedCargoIds;
-    const updated = current.includes(missionId)
-      ? current
-      : [...current, missionId];
-    set({
-      completedCargoIds: updated,
-      activeCargoMissionId: null,
-      cargoPhase: 'IDLE',
-    });
-    audioSynth.playChord([523.25, 659.25, 783.99, 1046.5]);
+    const updated = current.includes(missionId) ? current : [...current, missionId];
+    set({ completedCargoIds: updated, activeCargoMissionId: null, cargoPhase: 'IDLE' });
+    audioSynth.playChord(AUDIO_CHORDS.CARGO_DELIVERED);
   },
+
+  // ── Flight Planner actions ────────────────────────────────────────────────
 
   setPlannerMode: (enabled) => {
     const next = enabled !== undefined ? enabled : !get().plannerMode;
@@ -314,7 +354,7 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
       plannerMode: next,
       plannerDrawerOpen: next ? true : get().plannerDrawerOpen,
     });
-    audioSynth.playBeep(next ? 860 : 680, 0.05);
+    audioSynth.playBeep(next ? AUDIO_NOTES.PLANNER_ON : AUDIO_NOTES.PLANNER_OFF, AUDIO_DURATIONS.TINY);
     get().showToast(
       next
         ? get().lang === 'id'
@@ -331,13 +371,13 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
 
   addFlightPlanWaypoint: (wp) => {
     const list = get().flightPlanWaypoints;
-    if (list.length >= 12) {
-      get().showToast('MAX 12 WAYPOINTS IN FLIGHT PLAN');
+    if (list.length >= MAX_FLIGHT_PLAN_WAYPOINTS) {
+      get().showToast(`MAX ${MAX_FLIGHT_PLAN_WAYPOINTS} WAYPOINTS IN FLIGHT PLAN`);
       return;
     }
     const updated = [...list, { ...wp, id: `wp-${Date.now()}-${wpCounter++}` }];
     set({ flightPlanWaypoints: updated });
-    audioSynth.playBeep(780 + updated.length * 35, 0.05);
+    audioSynth.playBeep(WAYPOINT_AUDIO_BASE_FREQ + updated.length * WAYPOINT_AUDIO_STEP, AUDIO_DURATIONS.TINY);
     get().engine?.syncFlightPlanVisuals();
   },
 
@@ -351,12 +391,9 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
 
   removeFlightPlanWaypoint: (id) => {
     const updated = get().flightPlanWaypoints.filter((w) => w.id !== id);
-    const nextIdx = Math.min(
-      get().activeWaypointIdx,
-      Math.max(0, updated.length - 1)
-    );
+    const nextIdx = Math.min(get().activeWaypointIdx, Math.max(0, updated.length - 1));
     set({ flightPlanWaypoints: updated, activeWaypointIdx: nextIdx });
-    audioSynth.playBeep(620, 0.04);
+    audioSynth.playBeep(AUDIO_NOTES.WAYPOINT_REMOVE, AUDIO_DURATIONS.TINY);
     get().engine?.syncFlightPlanVisuals();
     if (updated.length === 0 && get().flightPlanActive) {
       get().engine?.stopFlightPlanPatrol();
@@ -366,19 +403,17 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
   clearFlightPlan: () => {
     if (get().flightPlanActive) get().engine?.stopFlightPlanPatrol();
     set({ flightPlanWaypoints: [], activeWaypointIdx: 0 });
-    audioSynth.playBeep(540, 0.06);
+    audioSynth.playBeep(AUDIO_NOTES.WAYPOINT_CLEAR, AUDIO_DURATIONS.SHORT);
     get().engine?.syncFlightPlanVisuals();
   },
 
   toggleFlightPlanLoop: () => {
     const next = !get().flightPlanLoop;
     set({ flightPlanLoop: next });
-    audioSynth.playBeep(750, 0.04);
+    audioSynth.playBeep(AUDIO_NOTES.WAYPOINT_LOOP, AUDIO_DURATIONS.TINY);
     get().engine?.syncFlightPlanVisuals();
     get().showToast(
-      next
-        ? 'PATROL LOOP: CONTINUOUS REPEAT'
-        : 'PATROL LOOP: SINGLE PASS (DOCK AT END)'
+      next ? 'PATROL LOOP: CONTINUOUS REPEAT' : 'PATROL LOOP: SINGLE PASS (DOCK AT END)'
     );
   },
 
@@ -397,29 +432,34 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
       };
     });
     set({ flightPlanWaypoints: waypoints, activeWaypointIdx: 0 });
-    audioSynth.playBeep(880, 0.07);
+    audioSynth.playBeep(AUDIO_NOTES.WAYPOINT_PRESET, AUDIO_DURATIONS.SHORT);
     get().engine?.syncFlightPlanVisuals();
   },
 
+  // ── Portfolio / content actions ───────────────────────────────────────────
+
   setProjectFilter: (cat) => {
     set({ activeProjectFilter: cat });
-    audioSynth.playBeep(760, 0.04);
+    audioSynth.playBeep(AUDIO_NOTES.PROJECT_FILTER, AUDIO_DURATIONS.TINY);
   },
 
   selectTechSkill: (idx) => {
     set({ selectedTechSkillIdx: idx });
-    audioSynth.playBeep(760 + idx * 80, 0.05);
+    audioSynth.playBeep(AUDIO_NOTES.NEXT_STATION + idx * 80, AUDIO_DURATIONS.TINY);
   },
 
   selectPublication: (idx) => {
     set({ selectedPublicationIdx: idx });
-    audioSynth.playBeep(820 + idx * 90, 0.05);
+    audioSynth.playBeep(820 + idx * 90, AUDIO_DURATIONS.TINY);
   },
 
   setAiBatchLoad: (val) =>
     set((s) => ({
       aiBatchLoad: val,
-      islandState: { ...s.islandState, helixMode: val > 10 ? 2 : 1 },
+      islandState: {
+        ...s.islandState,
+        helixMode: val > AI_HELIX_OVERCLOCK_THRESHOLD ? 2 : 1,
+      },
     })),
 
   addCommLog: (sender, msg) => {
@@ -442,36 +482,89 @@ export const useLabStore = create<LabStoreState>((set, get) => ({
 
   setIslandInteraction: (key, value, toastMsg) => {
     set((s) => ({ islandState: { ...s.islandState, [key]: value } }));
+
     if (key === 'biodomeSpectrum' && typeof value === 'number') {
       get().engine?.setIslandBiodomeMaterial(value);
     }
+
     if (key === 'sonicHarmony' && typeof value === 'number' && value > 0) {
       const chords: Record<number, number[]> = {
-        1: [440, 659.25],
-        2: [523.25, 659.25, 783.99],
-        3: [392, 587.33, 880],
+        1: AUDIO_CHORDS.SONIC_ETHEREAL,
+        2: AUDIO_CHORDS.SONIC_SOLAR,
+        3: AUDIO_CHORDS.SONIC_COSMOS,
       };
-      audioSynth.playChord(chords[value] || [440]);
+      audioSynth.playChord(chords[value] || [AUDIO_NOTES.A4]);
       set({ audioEnabled: audioSynth.isEnabled() });
     } else {
-      audioSynth.playBeep(740, 0.07);
+      audioSynth.playBeep(AUDIO_NOTES.ISLAND_INTERACTION, AUDIO_DURATIONS.SHORT);
     }
+
     if (toastMsg) get().showToast(toastMsg);
   },
 
+  // ── Modal actions ─────────────────────────────────────────────────────────
+
   openProjectModal: (idx) => {
     set({ activeProjectModalIdx: idx });
-    audioSynth.playBeep(880, 0.06);
+    audioSynth.playBeep(AUDIO_NOTES.PROJECT_MODAL, AUDIO_DURATIONS.NORMAL);
   },
 
   closeProjectModal: () => set({ activeProjectModalIdx: null }),
+
   setTerminalModalOpen: (open) => {
     set({ terminalModalOpen: open });
-    if (open) audioSynth.playBeep(890, 0.05);
+    if (open) audioSynth.playBeep(AUDIO_NOTES.MODAL_TERMINAL, AUDIO_DURATIONS.TINY);
   },
+
   setHangarModalOpen: (open) => {
     set({ hangarModalOpen: open });
-    if (open) audioSynth.playBeep(840, 0.05);
+    if (open) audioSynth.playBeep(AUDIO_NOTES.MODAL_HANGAR, AUDIO_DURATIONS.TINY);
   },
+
   setSnapshotDataUrl: (url) => set({ snapshotDataUrl: url }),
 }));
+
+// ── Grouped selectors (for use with useShallow) ───────────────────────────────
+
+/** Selects UI-only fields — avoids re-renders from flight state churn */
+export const selectUIState = (s: LabStoreState) => ({
+  lang: s.lang,
+  drawerCollapsed: s.drawerCollapsed,
+  toastMessage: s.toastMessage,
+  audioEnabled: s.audioEnabled,
+  bootCompleted: s.bootCompleted,
+});
+
+/** Selects flight telemetry fields */
+export const selectFlightState = (s: LabStoreState) => ({
+  flightPhase: s.flightPhase,
+  autopilot: s.autopilot,
+  cameraMode: s.cameraMode,
+  atmosphereMode: s.atmosphereMode,
+  autoSpotlightActive: s.autoSpotlightActive,
+  guidedTourActive: s.guidedTourActive,
+  flightPlanActive: s.flightPlanActive,
+  wingmanSwarmActive: s.wingmanSwarmActive,
+  activeStationId: s.activeStationId,
+  flightProfile: s.flightProfile,
+  activeLivery: s.activeLivery,
+  ringCourseActive: s.ringCourseActive,
+  ringGateLabel: s.ringGateLabel,
+});
+
+/** Selects cargo mission fields */
+export const selectCargoState = (s: LabStoreState) => ({
+  activeCargoMissionId: s.activeCargoMissionId,
+  cargoPhase: s.cargoPhase,
+  completedCargoIds: s.completedCargoIds,
+});
+
+/** Selects flight planner fields */
+export const selectPlannerState = (s: LabStoreState) => ({
+  plannerMode: s.plannerMode,
+  plannerDrawerOpen: s.plannerDrawerOpen,
+  flightPlanWaypoints: s.flightPlanWaypoints,
+  flightPlanActive: s.flightPlanActive,
+  flightPlanLoop: s.flightPlanLoop,
+  activeWaypointIdx: s.activeWaypointIdx,
+});

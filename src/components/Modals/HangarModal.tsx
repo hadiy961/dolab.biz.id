@@ -1,6 +1,7 @@
 import React from 'react';
 import { CloudLightning, Home, Navigation, Package, X } from 'lucide-react';
-import { useLabStore } from '../../store/useLabStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useLabStore, selectCargoState, selectFlightState } from '../../store/useLabStore';
 import {
   AtmosphereMode,
   DroneLiveryKey,
@@ -14,13 +15,14 @@ export const HangarModal: React.FC = () => {
   const open = useLabStore((s) => s.hangarModalOpen);
   const setOpen = useLabStore((s) => s.setHangarModalOpen);
   const lang = useLabStore((s) => s.lang);
-  const activeLivery = useLabStore((s) => s.activeLivery);
-  const flightProfile = useLabStore((s) => s.flightProfile);
-  const atmosphereMode = useLabStore((s) => s.atmosphereMode);
-  const wingmanSwarmActive = useLabStore((s) => s.wingmanSwarmActive);
-  const activeCargoMissionId = useLabStore((s) => s.activeCargoMissionId);
-  const cargoPhase = useLabStore((s) => s.cargoPhase);
-  const completedCargoIds = useLabStore((s) => s.completedCargoIds);
+
+  const { activeLivery, flightProfile, atmosphereMode, wingmanSwarmActive } =
+    useLabStore(useShallow(selectFlightState));
+
+  const { activeCargoMissionId, cargoPhase, completedCargoIds } =
+    useLabStore(useShallow(selectCargoState));
+
+  // Actions (stable refs)
   const setPlannerDrawerOpen = useLabStore((s) => s.setPlannerDrawerOpen);
   const setPlannerMode = useLabStore((s) => s.setPlannerMode);
   const engine = useLabStore((s) => s.engine);

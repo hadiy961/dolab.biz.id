@@ -13,6 +13,48 @@ import {
   FlightProfileKey,
   PayloadMission,
 } from '../types/lab';
+import {
+  AUDIO_CHORDS,
+  AUDIO_DURATIONS,
+  AUDIO_NOTES,
+} from '../constants/audio';
+import {
+  BIODOME_COLORS,
+  BIODOME_EMISSIVES,
+  BIODOME_EMISSIVE_INTENSITY_BRIGHT,
+  BIODOME_EMISSIVE_INTENSITY_DIM,
+  LIVERY_COLORS,
+} from '../constants/gameplay';
+import {
+  CAMERA_FAR,
+  CAMERA_FOV,
+  CAMERA_NEAR,
+  CAMERA_ZOOM_MAX,
+  CAMERA_ZOOM_MIN,
+  CONTRAIL_OPACITY_MAX,
+  CONTRAIL_SPEED_SCALE,
+  CONTRAIL_SPEED_THRESHOLD,
+  DOWNWASH_AGL_MAX,
+  DOWNWASH_THROTTLE_MIN,
+  FOG_DENSITY,
+  HEMI_GROUND_COLOR,
+  HEMI_INTENSITY,
+  HEMI_SKY_COLOR,
+  ISLAND_PROXIMITY_THRESHOLD,
+  LANDING_LASER_AGL_RANGE,
+  LIDAR_EXPAND_SPEED,
+  LIDAR_MAX_RADIUS,
+  RING_GATE_PASS_RADIUS,
+  SHADOW_CAMERA_DEPTH,
+  SHADOW_MAP_SIZE,
+  SKY_DOME_RADIUS,
+  SNAPSHOT_BAR_HEIGHT_RATIO,
+  SNAPSHOT_BAR_OPACITY,
+  SUN_COLOR,
+  SUN_INTENSITY,
+  TOUR_ORBIT_RATE,
+  TOUR_STATION_DWELL_S,
+} from '../constants/rendering';
 import { createSkyGradientTexture } from './textures';
 import { ArchipelagoBuildResult, buildSkyArchipelago } from './islandBuilders';
 import { buildAeroSondeDrone, DroneBuildResult } from './droneBuilder';
@@ -46,6 +88,8 @@ import {
   stepCameraSystem,
   stepDronePhysics,
 } from './systems/flightPhysicsSystem';
+import { InputController } from './systems/InputController';
+import { BootSequenceManager } from './systems/BootSequenceManager';
 
 export interface TelemetryDomRefs {
   altitudeEl: HTMLElement | null;
@@ -93,14 +137,14 @@ export class ArchipelagoEngine implements EngineBridge {
   private flightPlanVisualGroup!: THREE.Group;
   private spatialMarkerElements: SpatialWaypointMarker[] = [];
 
-  private raycaster = new THREE.Raycaster();
-  private pointerNDC = new THREE.Vector2();
-  private keys: Record<string, boolean> = {};
-  private boostActive = false;
   private guidedTourActive = false;
   private guidedTourTimer = 0;
   private wingmanSwarmActive = false;
   private currentFlightProfile: FlightProfileKey = 'SPORT';
+
+  // Sub-systems (extracted from God Class)
+  private input!: InputController;
+  private bootManager!: BootSequenceManager;
 
   private droneState: DronePhysicsState = {
     pos: new THREE.Vector3(STATIONS[0].padPoint.x, STATIONS[0].padPoint.y, STATIONS[0].padPoint.z),
@@ -142,17 +186,25 @@ export class ArchipelagoEngine implements EngineBridge {
     this.container = container;
     this.domRefs = domRefs;
     this.initWebGL();
-    this.setupEventListeners();
-    this.startBootSequence();
+    this.initInputController();
+    this.bootManager = new BootSequenceManager(() => this.initiateAutoTakeoffSequence());
+    this.bootManager.start();
     this.animate();
   }
+
+  // ── WebGL Initialisation ──────────────────────────────────────────────────
 
   private initWebGL(): void {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xc8e0f4);
-    this.scene.fog = new THREE.FogExp2(0xd8eaf7, 0.0014);
+    this.scene.fog = new THREE.FogExp2(0xd8eaf7, FOG_DENSITY);
 
-    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.2, 1600);
+    this.camera = new THREE.PerspectiveCamera(
+      CAMERA_FOV,
+      window.innerWidth / window.innerHeight,
+      CAMERA_NEAR,
+      CAMERA_FAR
+    );
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -164,7 +216,7 @@ export class ArchipelagoEngine implements EngineBridge {
     this.clock = new THREE.Clock();
 
     this.skyDomeMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(950, 32, 24),
+      new THREE.SphereGeometry(SKY_DOME_RADIUS, 32, 24),
       new THREE.MeshBasicMaterial({
         map: createSkyGradientTexture('#60a5fa', '#bae6fd', '#f8fafc'),
         side: THREE.BackSide,
@@ -186,20 +238,19 @@ export class ArchipelagoEngine implements EngineBridge {
     this.celestialOrbGroup.position.set(220, 240, -290);
     this.scene.add(this.celestialOrbGroup);
 
-    this.hemiLight = new THREE.HemisphereLight(0xe0f2fe, 0x94a3b8, 0.95);
+    this.hemiLight = new THREE.HemisphereLight(HEMI_SKY_COLOR, HEMI_GROUND_COLOR, HEMI_INTENSITY);
     this.scene.add(this.hemiLight);
 
-    this.sunDirLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
+    this.sunDirLight = new THREE.DirectionalLight(SUN_COLOR, SUN_INTENSITY);
     this.sunDirLight.position.set(140, 210, 120);
     this.sunDirLight.castShadow = true;
-    this.sunDirLight.shadow.mapSize.set(2048, 2048);
+    this.sunDirLight.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
     this.sunDirLight.shadow.camera.near = 10;
     this.sunDirLight.shadow.camera.far = 650;
-    const d = 220;
-    this.sunDirLight.shadow.camera.left = -d;
-    this.sunDirLight.shadow.camera.right = d;
-    this.sunDirLight.shadow.camera.top = d;
-    this.sunDirLight.shadow.camera.bottom = -d;
+    this.sunDirLight.shadow.camera.left = -SHADOW_CAMERA_DEPTH;
+    this.sunDirLight.shadow.camera.right = SHADOW_CAMERA_DEPTH;
+    this.sunDirLight.shadow.camera.top = SHADOW_CAMERA_DEPTH;
+    this.sunDirLight.shadow.camera.bottom = -SHADOW_CAMERA_DEPTH;
     this.scene.add(this.sunDirLight);
 
     this.archipelago = buildSkyArchipelago(this.scene);
@@ -226,6 +277,33 @@ export class ArchipelagoEngine implements EngineBridge {
     );
   }
 
+  private initInputController(): void {
+    this.input = new InputController(
+      this.container,
+      this.camera,
+      this.camOrbit,
+      {
+        toggleLandingTakeoff: () => this.toggleLandingTakeoff(),
+        triggerReturnToHome: () => this.triggerReturnToHome(),
+        captureAerialSnapshot: () => this.captureAerialSnapshot(),
+        toggleGuidedTour: () => this.toggleGuidedTour(),
+        triggerLidarScan: () => this.triggerLidarScan(),
+        cycleCameraMode: () => this.cycleCameraMode(),
+        cycleAtmosphere: () => this.cycleAtmosphere(),
+        toggleRingChallenge: () => this.toggleRingChallenge(),
+        engageAutopilot: (stId) => this.engageAutopilot(stId),
+        getIslandGroups: () => this.archipelago.stationObjects.map((s) => s.group),
+      }
+    );
+
+    // Also wire resize to renderer (InputController handles camera aspect)
+    window.addEventListener('resize', () =>
+      this.renderer.setSize(window.innerWidth, window.innerHeight)
+    );
+  }
+
+  // ── Public API (EngineBridge) ─────────────────────────────────────────────
+
   public syncFlightPlanVisuals(): void {
     if (!this.flightPlanVisualGroup) return;
     const store = useLabStore.getState();
@@ -236,23 +314,6 @@ export class ArchipelagoEngine implements EngineBridge {
       store.flightPlanActive,
       store.activeWaypointIdx
     );
-  }
-
-  private startBootSequence(): void {
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 4;
-      if (progress >= 100) {
-        clearInterval(interval);
-        useLabStore.getState().setBootState(100);
-        setTimeout(() => {
-          useLabStore.getState().setBootState(100, true);
-          setTimeout(() => this.initiateAutoTakeoffSequence(), 450);
-        }, 350);
-      } else {
-        useLabStore.getState().setBootState(progress);
-      }
-    }, 45);
   }
 
   private getActiveCargoMission(): PayloadMission | null {
@@ -293,7 +354,7 @@ export class ArchipelagoEngine implements EngineBridge {
       this.cargoMarkers.cargoPickupCrateGroup.visible = false;
       this.cargoMarkers.cargoDropzoneGroup.visible = true;
       store.syncFlightStatus({ activeCargoMissionId: mission.id, cargoPhase: 'IN_TRANSIT' });
-      audioSynth.playChord([440, 554.37, 659.25]);
+      audioSynth.playChord(AUDIO_CHORDS.CARGO_PICKUP);
       store.showToast(`${UI_TRANSLATIONS[store.lang].cargoPickedUp} (${mission.weightKg} KG)`);
       if (autoFlyToOrigin) this.engageAutopilot(mission.destStationId);
     } else {
@@ -301,7 +362,7 @@ export class ArchipelagoEngine implements EngineBridge {
       this.cargoMarkers.cargoPickupCrateGroup.visible = true;
       this.cargoMarkers.cargoDropzoneGroup.visible = false;
       store.syncFlightStatus({ activeCargoMissionId: mission.id, cargoPhase: 'AWAITING_PICKUP' });
-      audioSynth.playBeep(760, 0.08);
+      audioSynth.playBeep(AUDIO_NOTES.CARGO_ASSIGN, AUDIO_DURATIONS.MEDIUM);
       store.showToast(`${UI_TRANSLATIONS[store.lang].cargoAssigned}: ${originSt.shortName}`);
       if (autoFlyToOrigin) this.engageAutopilot(mission.originStationId);
     }
@@ -313,7 +374,7 @@ export class ArchipelagoEngine implements EngineBridge {
     this.cargoMarkers.cargoPickupCrateGroup.visible = false;
     this.cargoMarkers.cargoDropzoneGroup.visible = false;
     store.syncFlightStatus({ activeCargoMissionId: null, cargoPhase: 'IDLE' });
-    audioSynth.playBeep(480, 0.08);
+    audioSynth.playBeep(AUDIO_NOTES.CARGO_ABORT, AUDIO_DURATIONS.MEDIUM);
     store.showToast(
       store.lang === 'id'
         ? 'MISI KARGO DIBATALKAN — BEBAN DILEPAS'
@@ -331,7 +392,7 @@ export class ArchipelagoEngine implements EngineBridge {
       this.cargoMarkers.cargoPickupCrateGroup.visible = false;
       this.cargoMarkers.cargoDropzoneGroup.visible = true;
       store.syncFlightStatus({ cargoPhase: 'IN_TRANSIT' });
-      audioSynth.playChord([440, 554.37, 659.25]);
+      audioSynth.playChord(AUDIO_CHORDS.CARGO_PICKUP);
       store.showToast(
         `${UI_TRANSLATIONS[store.lang].cargoPickedUp} (${mission.weightKg} KG → ${
           STATIONS[mission.destStationId].shortName
@@ -363,7 +424,7 @@ export class ArchipelagoEngine implements EngineBridge {
     if (this.guidedTourActive) this.toggleGuidedTour(false);
     store.syncFlightStatus({ flightPlanActive: true, activeWaypointIdx: 0, autopilot: true });
     this.syncFlightPlanVisuals();
-    audioSynth.playChord([523.25, 659.25, 783.99]);
+    audioSynth.playChord(AUDIO_CHORDS.PATROL_START);
     store.showToast(UI_TRANSLATIONS[store.lang].patrolStarted);
 
     if (this.droneState.flightPhase === 'LANDED' || this.droneState.flightPhase === 'LANDING') {
@@ -381,7 +442,7 @@ export class ArchipelagoEngine implements EngineBridge {
     this.droneState.autopilot = false;
     store.syncFlightStatus({ flightPlanActive: false, autopilot: false });
     this.syncFlightPlanVisuals();
-    audioSynth.playBeep(520, 0.07);
+    audioSynth.playBeep(AUDIO_NOTES.LAND, AUDIO_DURATIONS.SHORT);
     store.showToast(UI_TRANSLATIONS[store.lang].patrolStopped);
   }
 
@@ -392,7 +453,7 @@ export class ArchipelagoEngine implements EngineBridge {
     const nextIdx = (store.activeWaypointIdx + 1) % len;
     store.syncFlightStatus({ activeWaypointIdx: nextIdx });
     this.syncFlightPlanVisuals();
-    audioSynth.playBeep(840, 0.05);
+    audioSynth.playBeep(AUDIO_NOTES.WAYPOINT_SKIP, AUDIO_DURATIONS.TINY);
   }
 
   private initiateAutoTakeoffSequence(): void {
@@ -402,7 +463,7 @@ export class ArchipelagoEngine implements EngineBridge {
     const store = useLabStore.getState();
     store.syncFlightStatus({ flightPhase: 'TAKING_OFF' });
     store.showToast(UI_TRANSLATIONS[store.lang].takeoffMsg);
-    audioSynth.playBeep(660, 0.08);
+    audioSynth.playBeep(AUDIO_NOTES.TAKEOFF, AUDIO_DURATIONS.MEDIUM);
   }
 
   public toggleLandingTakeoff(): void {
@@ -424,7 +485,7 @@ export class ArchipelagoEngine implements EngineBridge {
         targetStationId: this.droneState.activeStationId,
       });
       store.showToast(UI_TRANSLATIONS[store.lang].landingMsg);
-      audioSynth.playBeep(520, 0.08);
+      audioSynth.playBeep(AUDIO_NOTES.LAND, AUDIO_DURATIONS.MEDIUM);
     }
   }
 
@@ -441,7 +502,7 @@ export class ArchipelagoEngine implements EngineBridge {
 
     this.droneState.targetStationId = stationId;
     store.showToast(UI_TRANSLATIONS[store.lang].autopilotTo + target.shortName.toUpperCase());
-    audioSynth.playBeep(780, 0.06);
+    audioSynth.playBeep(AUDIO_NOTES.AUTOPILOT, AUDIO_DURATIONS.NORMAL);
 
     if (this.droneState.flightPhase === 'LANDED' || this.droneState.flightPhase === 'LANDING') {
       this.droneState.pendingAutopilotStationId = stationId;
@@ -487,7 +548,7 @@ export class ArchipelagoEngine implements EngineBridge {
     const store = useLabStore.getState();
     store.syncFlightStatus({ cameraMode: this.droneState.cameraMode });
     store.showToast('CAMERA VIEW: ' + names[this.droneState.cameraMode]);
-    audioSynth.playBeep(700, 0.05);
+    audioSynth.playBeep(AUDIO_NOTES.CAMERA_CYCLE, AUDIO_DURATIONS.TINY);
   }
 
   public cycleAtmosphere(targetMode?: AtmosphereMode): void {
@@ -520,7 +581,7 @@ export class ArchipelagoEngine implements EngineBridge {
         preset.autoSpotlight ? ' • AUTO-SPOTLIGHT ON' : ''
       })`
     );
-    audioSynth.playBeep(820, 0.06);
+    audioSynth.playBeep(AUDIO_NOTES.ATMOSPHERE, AUDIO_DURATIONS.NORMAL);
   }
 
   public triggerLidarScan(): void {
@@ -533,7 +594,7 @@ export class ArchipelagoEngine implements EngineBridge {
     );
     const store = useLabStore.getState();
     store.showToast(UI_TRANSLATIONS[store.lang].scanMsg);
-    audioSynth.playBeep(960, 0.12);
+    audioSynth.playBeep(AUDIO_NOTES.LIDAR_SCAN, AUDIO_DURATIONS.LONG);
   }
 
   public toggleRingChallenge(): void {
@@ -553,34 +614,25 @@ export class ArchipelagoEngine implements EngineBridge {
     } else {
       store.syncFlightStatus({ ringCourseActive: false, ringGateLabel: 'RING TRIAL' });
     }
-    audioSynth.playBeep(740, 0.08);
+    audioSynth.playBeep(AUDIO_NOTES.ISLAND_INTERACTION, AUDIO_DURATIONS.MEDIUM);
   }
 
   public applyDroneLivery(preset: DroneLiveryKey): void {
     const { droneHullMaterial, droneCanopyMaterial } = this.drone;
+    const colors = LIVERY_COLORS[preset];
+    droneHullMaterial.color.setHex(colors.hull);
+    droneCanopyMaterial.color.setHex(colors.canopy);
+
     const labels: Record<DroneLiveryKey, string> = {
       pearl: 'PEARL WHITE',
       stealth: 'STEALTH CARBON',
       rescue: 'SAR ORANGE',
       royal: 'GOLD SPEC',
     };
-    if (preset === 'stealth') {
-      droneHullMaterial.color.setHex(0x1e293b);
-      droneCanopyMaterial.color.setHex(0x38bdf8);
-    } else if (preset === 'rescue') {
-      droneHullMaterial.color.setHex(0xf97316);
-      droneCanopyMaterial.color.setHex(0x0f172a);
-    } else if (preset === 'royal') {
-      droneHullMaterial.color.setHex(0xfbbf24);
-      droneCanopyMaterial.color.setHex(0x1e293b);
-    } else {
-      droneHullMaterial.color.setHex(0xf8fafc);
-      droneCanopyMaterial.color.setHex(0x0284c7);
-    }
     const store = useLabStore.getState();
     store.syncFlightStatus({ activeLivery: preset });
     store.showToast(`DRONE LIVERY: ${labels[preset]}`);
-    audioSynth.playBeep(880, 0.05);
+    audioSynth.playBeep(AUDIO_NOTES.LIVERY, AUDIO_DURATIONS.TINY);
   }
 
   public setFlightProfile(profileKey: FlightProfileKey): void {
@@ -588,7 +640,7 @@ export class ArchipelagoEngine implements EngineBridge {
     const store = useLabStore.getState();
     store.syncFlightStatus({ flightProfile: profileKey });
     store.showToast(`FLIGHT CONTROLLER: ${profileKey} MODE`);
-    audioSynth.playBeep(790, 0.06);
+    audioSynth.playBeep(AUDIO_NOTES.FLIGHT_PROFILE, AUDIO_DURATIONS.NORMAL);
   }
 
   public toggleWingmanSwarm(): void {
@@ -604,7 +656,7 @@ export class ArchipelagoEngine implements EngineBridge {
         ? '2 WINGMAN DRONES DEPLOYED IN V-FORMATION'
         : 'WINGMAN SWARM RECALLED'
     );
-    audioSynth.playBeep(920, 0.08);
+    audioSynth.playBeep(AUDIO_NOTES.WINGMAN, AUDIO_DURATIONS.MEDIUM);
   }
 
   public triggerReturnToHome(isLowBattery = false): void {
@@ -626,7 +678,7 @@ export class ArchipelagoEngine implements EngineBridge {
         ? 'LOW BATTERY RTH — AUTO-LANDING ON NEAREST HELIPAD'
         : 'RETURN TO HOME (RTH) — AUTO-LANDING ON HELIPAD'
     );
-    audioSynth.playBeep(540, 0.12);
+    audioSynth.playBeep(AUDIO_NOTES.RTH, AUDIO_DURATIONS.LONG);
   }
 
   public captureAerialSnapshot(): void {
@@ -637,8 +689,8 @@ export class ArchipelagoEngine implements EngineBridge {
     const ctx = snapCanvas.getContext('2d')!;
     ctx.drawImage(this.renderer.domElement, 0, 0);
 
-    const barH = Math.max(44, Math.round(snapCanvas.height * 0.065));
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+    const barH = Math.max(44, Math.round(snapCanvas.height * SNAPSHOT_BAR_HEIGHT_RATIO));
+    ctx.fillStyle = `rgba(15, 23, 42, ${SNAPSHOT_BAR_OPACITY})`;
     ctx.fillRect(0, snapCanvas.height - barH, snapCanvas.width, barH);
 
     ctx.fillStyle = '#38bdf8';
@@ -654,23 +706,24 @@ export class ArchipelagoEngine implements EngineBridge {
 
     const store = useLabStore.getState();
     store.setSnapshotDataUrl(snapCanvas.toDataURL('image/png'));
-    audioSynth.playBeep(1040, 0.08);
+    audioSynth.playBeep(AUDIO_NOTES.C6, AUDIO_DURATIONS.MEDIUM);
     store.showToast('AERIAL TELEMETRY PHOTO CAPTURED');
   }
 
   public setTouchKey(code: string, state: boolean): void {
-    this.keys[code] = state;
+    this.input.setTouchKey(code, state);
   }
 
   public setIslandBiodomeMaterial(val: number): void {
     const mat = this.archipelago.islandFX.biodomeCoreMat;
     if (!mat) return;
-    const colors = [0x4ade80, 0x22d3ee, 0xfacc15];
-    const emissives = [0x10b981, 0x06b6d4, 0xeab308];
-    mat.color.setHex(colors[val] ?? 0x4ade80);
-    mat.emissive.setHex(emissives[val] ?? 0x10b981);
-    mat.emissiveIntensity = val === 0 ? 0.35 : 0.85;
+    mat.color.setHex(BIODOME_COLORS[val] ?? BIODOME_COLORS[0]);
+    mat.emissive.setHex(BIODOME_EMISSIVES[val] ?? BIODOME_EMISSIVES[0]);
+    mat.emissiveIntensity =
+      val === 0 ? BIODOME_EMISSIVE_INTENSITY_DIM : BIODOME_EMISSIVE_INTENSITY_BRIGHT;
   }
+
+  // ── Animation Loop ────────────────────────────────────────────────────────
 
   private updateEnvironmentAndHUD(dt: number): void {
     const elapsed = this.clock.getElapsedTime();
@@ -703,20 +756,16 @@ export class ArchipelagoEngine implements EngineBridge {
       targetStationId: this.droneState.targetStationId,
     });
 
-    if (closestStation.id !== this.droneState.activeStationId && minDistance < 28.0) {
+    if (closestStation.id !== this.droneState.activeStationId && minDistance < ISLAND_PROXIMITY_THRESHOLD) {
       this.droneState.activeStationId = closestStation.id;
       store.syncFlightStatus({ activeStationId: closestStation.id });
       store.markIslandVisited(closestStation.id);
     }
 
-    if (
-      this.guidedTourActive &&
-      !this.droneState.autopilot &&
-      this.droneState.flightPhase === 'AIRBORNE'
-    ) {
+    if (this.guidedTourActive && !this.droneState.autopilot && this.droneState.flightPhase === 'AIRBORNE') {
       this.guidedTourTimer += dt;
-      this.camOrbit.theta += dt * 0.24;
-      if (this.guidedTourTimer > 6.0) {
+      this.camOrbit.theta += dt * TOUR_ORBIT_RATE;
+      if (this.guidedTourTimer > TOUR_STATION_DWELL_S) {
         this.guidedTourTimer = 0;
         this.navigateNextStation();
       }
@@ -729,14 +778,10 @@ export class ArchipelagoEngine implements EngineBridge {
     );
     const agl = this.droneState.pos.y - deckY;
 
-    if (horizToIsland < closestStation.islandRadius * 0.95 && agl > 0.12 && agl < 28.0) {
+    if (horizToIsland < closestStation.islandRadius * 0.95 && agl > 0.12 && agl < LANDING_LASER_AGL_RANGE) {
       this.drone.groundTargetGroup.visible = true;
       this.drone.altitudeLaserLine.visible = true;
-      this.drone.groundTargetGroup.position.set(
-        this.droneState.pos.x,
-        deckY + 0.02,
-        this.droneState.pos.z
-      );
+      this.drone.groundTargetGroup.position.set(this.droneState.pos.x, deckY + 0.02, this.droneState.pos.z);
       this.drone.groundTargetGroup.rotation.y = elapsed * 1.2;
 
       const posAttr = this.drone.altitudeLaserLine.geometry.attributes.position;
@@ -753,27 +798,19 @@ export class ArchipelagoEngine implements EngineBridge {
     if (
       horizToIsland < closestStation.islandRadius * 0.9 &&
       agl >= 0 &&
-      agl < 7.5 &&
-      this.droneState.rotorThrottle > 0.15
+      agl < DOWNWASH_AGL_MAX &&
+      this.droneState.rotorThrottle > DOWNWASH_THROTTLE_MIN
     ) {
-      this.drone.downwashRingMesh.position.set(
-        this.droneState.pos.x,
-        deckY + 0.03,
-        this.droneState.pos.z
-      );
-      const s = 0.8 + (1 - agl / 7.5) * 0.9 + Math.sin(elapsed * 14) * 0.08;
+      this.drone.downwashRingMesh.position.set(this.droneState.pos.x, deckY + 0.03, this.droneState.pos.z);
+      const s = 0.8 + (1 - agl / DOWNWASH_AGL_MAX) * 0.9 + Math.sin(elapsed * 14) * 0.08;
       this.drone.downwashRingMesh.scale.set(s, s, 1);
-      downwashMat.opacity = (1 - agl / 7.5) * 0.38 * this.droneState.rotorThrottle;
+      downwashMat.opacity = (1 - agl / DOWNWASH_AGL_MAX) * 0.38 * this.droneState.rotorThrottle;
     } else {
       downwashMat.opacity = 0;
     }
 
-    const leftTip = new THREE.Vector3(-1.15, 0.1, 1.05).applyMatrix4(
-      this.drone.droneGroup.matrixWorld
-    );
-    const rightTip = new THREE.Vector3(1.15, 0.1, 1.05).applyMatrix4(
-      this.drone.droneGroup.matrixWorld
-    );
+    const leftTip = new THREE.Vector3(-1.15, 0.1, 1.05).applyMatrix4(this.drone.droneGroup.matrixWorld);
+    const rightTip = new THREE.Vector3(1.15, 0.1, 1.05).applyMatrix4(this.drone.droneGroup.matrixWorld);
     this.drone.contrailLeftHistory.pop();
     this.drone.contrailLeftHistory.unshift(leftTip);
     this.drone.contrailRightHistory.pop();
@@ -782,19 +819,21 @@ export class ArchipelagoEngine implements EngineBridge {
     this.drone.contrailRightLine.geometry.setFromPoints(this.drone.contrailRightHistory);
     const spd = this.droneState.vel.length();
     (this.drone.contrailLeftLine.material as THREE.LineBasicMaterial).opacity =
-      spd > 5.0 ? Math.min(0.55, (spd - 5.0) / 22.0) : 0.0;
+      spd > CONTRAIL_SPEED_THRESHOLD
+        ? Math.min(CONTRAIL_OPACITY_MAX, (spd - CONTRAIL_SPEED_THRESHOLD) / CONTRAIL_SPEED_SCALE)
+        : 0.0;
 
     if (this.lidarScanActive) {
-      this.lidarScanRadius += dt * 55;
+      this.lidarScanRadius += dt * LIDAR_EXPAND_SPEED;
       this.lidarRingMesh.scale.set(this.lidarScanRadius, this.lidarScanRadius, 1);
-      this.lidarRingMesh.material.opacity = Math.max(0, 0.75 - this.lidarScanRadius / 95);
-      if (this.lidarScanRadius > 95) {
+      this.lidarRingMesh.material.opacity = Math.max(0, 0.75 - this.lidarScanRadius / LIDAR_MAX_RADIUS);
+      if (this.lidarScanRadius > LIDAR_MAX_RADIUS) {
         this.lidarScanActive = false;
         this.lidarRingMesh.material.opacity = 0;
       }
     }
 
-    // Direct 60Hz DOM Telemetry Updates
+    // Direct 60Hz DOM Telemetry Updates (kept as DOM mutation for max perf)
     const hdgDeg = ((Math.round((-this.droneState.yaw * 180) / Math.PI) % 360) + 360) % 360;
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     if (this.domRefs.headingEl) {
@@ -878,8 +917,8 @@ export class ArchipelagoEngine implements EngineBridge {
     });
 
     const currentGate = this.ringGateMeshes[this.activeRingIndex];
-    if (currentGate && this.droneState.pos.distanceTo(currentGate.group.position) < 4.5) {
-      audioSynth.playBeep(980, 0.09);
+    if (currentGate && this.droneState.pos.distanceTo(currentGate.group.position) < RING_GATE_PASS_RADIUS) {
+      audioSynth.playBeep(AUDIO_NOTES.RING_GATE, AUDIO_DURATIONS.SHORT);
       this.activeRingIndex++;
       const store = useLabStore.getState();
       if (this.activeRingIndex >= this.ringGateMeshes.length) {
@@ -895,93 +934,6 @@ export class ArchipelagoEngine implements EngineBridge {
     }
   }
 
-  private onResize = (): void => {
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-  };
-
-  private onKeyDown = (e: KeyboardEvent): void => {
-    const activeTag = document.activeElement?.tagName;
-    if (activeTag && ['INPUT', 'TEXTAREA'].includes(activeTag)) return;
-
-    this.keys[e.code] = true;
-    const store = useLabStore.getState();
-
-    if (e.code === 'KeyB') this.boostActive = true;
-    if (e.code === 'KeyT') this.toggleLandingTakeoff();
-    if (e.code === 'KeyH') this.triggerReturnToHome();
-    if (e.code === 'KeyM') store.setHangarModalOpen(true);
-    if (e.code === 'KeyP') this.captureAerialSnapshot();
-    if (e.code === 'KeyG') this.toggleGuidedTour();
-    if (e.code === 'KeyF') this.triggerLidarScan();
-    if (e.code === 'KeyC') this.cycleCameraMode();
-    if (e.code === 'KeyV') this.cycleAtmosphere();
-    if (e.code === 'KeyR') this.toggleRingChallenge();
-    if (e.code === 'KeyK') store.setTerminalModalOpen(true);
-  };
-
-  private onKeyUp = (e: KeyboardEvent): void => {
-    this.keys[e.code] = false;
-    if (e.code === 'KeyB') this.boostActive = false;
-  };
-
-  private onMouseDown = (e: MouseEvent): void => {
-    this.camOrbit.isDragging = true;
-    this.camOrbit.lastX = e.clientX;
-    this.camOrbit.lastY = e.clientY;
-  };
-
-  private onMouseMove = (e: MouseEvent): void => {
-    if (!this.camOrbit.isDragging) return;
-    const dx = e.clientX - this.camOrbit.lastX;
-    const dy = e.clientY - this.camOrbit.lastY;
-    this.camOrbit.lastX = e.clientX;
-    this.camOrbit.lastY = e.clientY;
-    this.camOrbit.theta -= dx * 0.006;
-    this.camOrbit.phi = THREE.MathUtils.clamp(this.camOrbit.phi + dy * 0.005, 0.08, 1.15);
-  };
-
-  private onMouseUp = (): void => {
-    this.camOrbit.isDragging = false;
-  };
-
-  private onWheel = (e: WheelEvent): void => {
-    this.camOrbit.distance = THREE.MathUtils.clamp(
-      this.camOrbit.distance + e.deltaY * 0.01,
-      4.5,
-      22.0
-    );
-  };
-
-  private onDoubleClick = (e: MouseEvent): void => {
-    this.pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
-    this.pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
-    this.raycaster.setFromCamera(this.pointerNDC, this.camera);
-    const islandGroups = this.archipelago.stationObjects.map((s) => s.group);
-    const hits = this.raycaster.intersectObjects(islandGroups, true);
-    if (hits.length > 0) {
-      let hitObj: THREE.Object3D | null = hits[0].object;
-      while (hitObj && hitObj.parent && !islandGroups.includes(hitObj as THREE.Group)) {
-        hitObj = hitObj.parent;
-      }
-      const foundIdx = islandGroups.indexOf(hitObj as THREE.Group);
-      if (foundIdx !== -1) this.engageAutopilot(foundIdx);
-    }
-  };
-
-  private setupEventListeners(): void {
-    window.addEventListener('resize', this.onResize);
-    window.addEventListener('keydown', this.onKeyDown);
-    window.addEventListener('keyup', this.onKeyUp);
-    window.addEventListener('mousemove', this.onMouseMove);
-    window.addEventListener('mouseup', this.onMouseUp);
-
-    this.container.addEventListener('mousedown', this.onMouseDown);
-    this.container.addEventListener('wheel', this.onWheel, { passive: true });
-    this.container.addEventListener('dblclick', this.onDoubleClick);
-  }
-
   private animate = (): void => {
     this.animFrameId = requestAnimationFrame(this.animate);
     const dt = this.clock.getDelta();
@@ -994,15 +946,13 @@ export class ArchipelagoEngine implements EngineBridge {
       droneState: this.droneState,
       windState: this.windState,
       drone: this.drone,
-      keys: this.keys,
-      boostActive: this.boostActive,
+      keys: this.input.getKeys(),
+      boostActive: this.input.boostActive,
       wingmanSwarmActive: this.wingmanSwarmActive,
       currentFlightProfile: this.currentFlightProfile,
       store,
       activeCargo: store.cargoPhase === 'IN_TRANSIT' ? this.getActiveCargoMission() : null,
-      onStopGuidedTour: () => {
-        if (this.guidedTourActive) this.toggleGuidedTour(false);
-      },
+      onStopGuidedTour: () => { if (this.guidedTourActive) this.toggleGuidedTour(false); },
       onStopFlightPlan: () => this.stopFlightPlanPatrol(),
       onSyncFlightPlanVisuals: () => this.syncFlightPlanVisuals(),
       onInitiateAutoTakeoff: () => this.initiateAutoTakeoffSequence(),
@@ -1018,24 +968,19 @@ export class ArchipelagoEngine implements EngineBridge {
       droneState: this.droneState,
       camOrbit: this.camOrbit,
       windState: this.windState,
-      boostActive: this.boostActive,
+      boostActive: this.input.boostActive,
     });
 
     this.updateEnvironmentAndHUD(dt);
     this.renderer.render(this.scene, this.camera);
   };
 
+  // ── Cleanup ───────────────────────────────────────────────────────────────
+
   public dispose(): void {
     if (this.animFrameId !== null) cancelAnimationFrame(this.animFrameId);
-    window.removeEventListener('resize', this.onResize);
-    window.removeEventListener('keydown', this.onKeyDown);
-    window.removeEventListener('keyup', this.onKeyUp);
-    window.removeEventListener('mousemove', this.onMouseMove);
-    window.removeEventListener('mouseup', this.onMouseUp);
-
-    this.container.removeEventListener('mousedown', this.onMouseDown);
-    this.container.removeEventListener('wheel', this.onWheel);
-    this.container.removeEventListener('dblclick', this.onDoubleClick);
+    this.bootManager.dispose();
+    this.input.dispose();
     this.renderer.dispose();
   }
 }

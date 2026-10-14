@@ -11,7 +11,8 @@ import {
   Settings,
   Trophy,
 } from 'lucide-react';
-import { useLabStore } from '../store/useLabStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useLabStore, selectFlightState } from '../store/useLabStore';
 import { STATIONS } from '../data/stations';
 import { PAYLOAD_MISSIONS } from '../data/cargoMissions';
 import { WEATHER_PRESETS } from '../data/flightAndWeather';
@@ -24,53 +25,49 @@ interface TopHudBarProps {
   windRef: React.RefObject<HTMLSpanElement>;
 }
 
+const CAMERA_NAMES = ['CHASE', 'COCKPIT', 'TOP-DOWN'] as const;
+
 export const TopHudBar: React.FC<TopHudBarProps> = ({
   altitudeRef,
   speedRef,
   batteryRef,
   windRef,
 }) => {
-  const flightPhase = useLabStore((s) => s.flightPhase);
-  const autopilot = useLabStore((s) => s.autopilot);
-  const flightPlanActive = useLabStore((s) => s.flightPlanActive);
-  const guidedTourActive = useLabStore((s) => s.guidedTourActive);
-  const cameraMode = useLabStore((s) => s.cameraMode);
-  const atmosphereMode = useLabStore((s) => s.atmosphereMode);
-  const autoSpotlightActive = useLabStore((s) => s.autoSpotlightActive);
-  const completedCargoCount = useLabStore((s) => s.completedCargoIds.length);
+  // Grouped flight state — single subscription, no churn
+  const {
+    flightPhase,
+    autopilot,
+    flightPlanActive,
+    guidedTourActive,
+    cameraMode,
+    atmosphereMode,
+    autoSpotlightActive,
+  } = useLabStore(useShallow(selectFlightState));
+
+  // Scalar selectors for fields that change independently
   const lang = useLabStore((s) => s.lang);
   const visitedCount = useLabStore((s) => s.visitedIslands.length);
+  const completedCargoCount = useLabStore((s) => s.completedCargoIds.length);
+
+  // Actions (stable references — no need for shallow)
   const engine = useLabStore((s) => s.engine);
   const toggleLang = useLabStore((s) => s.toggleLang);
   const setHangarModalOpen = useLabStore((s) => s.setHangarModalOpen);
 
-  const cameraNames = ['CHASE', 'COCKPIT', 'TOP-DOWN'];
   const wxPreset = WEATHER_PRESETS[atmosphereMode];
 
   const getBadgeConfig = () => {
     if (flightPhase === 'LANDED') {
-      return {
-        text: 'GROUNDED • 0 RPM',
-        cls: 'bg-amber-500/15 text-amber-700 border-amber-500/30',
-      };
+      return { text: 'GROUNDED • 0 RPM', cls: 'bg-amber-500/15 text-amber-700 border-amber-500/30' };
     }
     if (flightPhase === 'TAKING_OFF') {
-      return {
-        text: 'SPOOLING UP',
-        cls: 'bg-sky-500/15 text-sky-700 border-sky-500/30',
-      };
+      return { text: 'SPOOLING UP', cls: 'bg-sky-500/15 text-sky-700 border-sky-500/30' };
     }
     if (flightPhase === 'LANDING') {
-      return {
-        text: 'LANDING SEQ',
-        cls: 'bg-amber-500/15 text-amber-700 border-amber-500/30',
-      };
+      return { text: 'LANDING SEQ', cls: 'bg-amber-500/15 text-amber-700 border-amber-500/30' };
     }
     if (flightPlanActive) {
-      return {
-        text: 'WAYPOINT PATROL',
-        cls: 'bg-indigo-500/15 text-indigo-700 border-indigo-500/30',
-      };
+      return { text: 'WAYPOINT PATROL', cls: 'bg-indigo-500/15 text-indigo-700 border-indigo-500/30' };
     }
     return {
       text: autopilot ? 'AUTOPILOT' : 'STANDBY HOVER',
@@ -245,7 +242,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             title="Switch Camera View [C]"
           >
             <Camera className="w-3.5 h-3.5 text-sky-600" />
-            <span className="hidden xl:inline">{cameraNames[cameraMode]}</span>
+            <span className="hidden xl:inline">{CAMERA_NAMES[cameraMode]}</span>
           </button>
 
           <button

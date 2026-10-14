@@ -1,7 +1,8 @@
 import React from 'react';
 import { Play, Route, Square } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { STATIONS } from '../data/stations';
-import { useLabStore } from '../store/useLabStore';
+import { useLabStore, selectPlannerState } from '../store/useLabStore';
 import { FlightPlannerDrawer } from './FlightPlannerDrawer';
 
 interface RadarWidgetProps {
@@ -13,14 +14,18 @@ export const RadarWidget: React.FC<RadarWidgetProps> = ({
   radarCanvasRef,
   headingRef,
 }) => {
+  const {
+    plannerMode,
+    plannerDrawerOpen,
+    flightPlanWaypoints: waypoints,
+    flightPlanActive,
+  } = useLabStore(useShallow(selectPlannerState));
+
+  // Actions & engine (stable refs)
   const engine = useLabStore((s) => s.engine);
   const setHangarModalOpen = useLabStore((s) => s.setHangarModalOpen);
-  const plannerMode = useLabStore((s) => s.plannerMode);
   const setPlannerMode = useLabStore((s) => s.setPlannerMode);
-  const plannerDrawerOpen = useLabStore((s) => s.plannerDrawerOpen);
   const setPlannerDrawerOpen = useLabStore((s) => s.setPlannerDrawerOpen);
-  const waypoints = useLabStore((s) => s.flightPlanWaypoints);
-  const flightPlanActive = useLabStore((s) => s.flightPlanActive);
   const addFlightPlanWaypoint = useLabStore((s) => s.addFlightPlanWaypoint);
 
   const handleRadarClick = (e: React.MouseEvent<HTMLCanvasElement>) => {

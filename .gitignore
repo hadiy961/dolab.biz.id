@@ -1,9 +1,16 @@
 # ==========================================
-# Dependencies
+# Dependencies & Package Managers
 # ==========================================
 node_modules/
 /.pnp
 .pnp.js
+.pnp.*
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.npm/
 
 # ==========================================
 # Production & Build Outputs
@@ -12,28 +19,35 @@ dist/
 dist-ssr/
 build/
 out/
+.output/
+storybook-static/
 *.local
 
 # ==========================================
-# TypeScript & Cache
+# TypeScript, Bundler & Linter Cache
 # ==========================================
 *.tsbuildinfo
+tsconfig.tsbuildinfo
 .vite/
 .cache/
-.eslintcache
+.parcel-cache/
 .turbo/
+.eslintcache
+.stylelintcache
+.prettiercache
 
 # ==========================================
 # Environment Variables & Secrets
 # ==========================================
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*.local
 *.env
+*.env.local
+.env.vault
 !*.env.example
 !*.env.template
+!*.env.sample
 
 # ==========================================
 # Logs & Diagnostics
@@ -47,26 +61,65 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # ==========================================
-# Test Coverage & Reports
+# Test Coverage & End-to-End Reports
 # ==========================================
 coverage/
 *.lcov
 .nyc_output/
+playwright-report/
+blob-report/
+test-results/
+cypress/videos/
+cypress/screenshots/
 
 # ==========================================
 # IDE & Code Editor Configurations
 # ==========================================
+# Visual Studio Code (retains shared team settings & recommendations)
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+*.code-workspace
+
+# JetBrains / IntelliJ / WebStorm
 .idea/
+*.iml
+*.iws
+*.ipr
+cmake-build-*/
+
+# Visual Studio & Windows Dev Tools
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
+*.user
+*.userosv
+*.sln.docstates
+
+# Vim, Emacs, Sublime & Temporary Editor Files
+*.swp
+*.swo
 *.sw?
+*~
+*.bak
+*.tmp
+*.temp
+.#*
 *.sublime-workspace
 *.sublime-project
+
+# ==========================================
+# AI Assistant, Agent & Local Tool Workspaces
+# ==========================================
+.commandcode/skills/
+.commandcode/cache/
+.commandcode/*.log
+.agents/
+.gemini/
+.claude/local/
 
 # ==========================================
 # Operating System Artifacts
@@ -78,6 +131,7 @@ coverage/
 ._*
 .Spotlight-V100
 .Trashes
+Icon?
 
 # Windows
 Thumbs.db
@@ -88,5 +142,6 @@ Desktop.ini
 $RECYCLE.BIN/
 
 # Linux
-*~
 .directory
+.fuse_hidden*
+.nfs*
