@@ -8,7 +8,8 @@ export type DroneLiveryKey = 'pearl' | 'stealth' | 'rescue' | 'royal';
 
 export type CameraMode = 0 | 1 | 2; // 0: Chase, 1: Cockpit, 2: Top-Down
 
-export type AtmosphereMode = 0 | 1 | 2; // 0: Daylight, 1: Sunset, 2: Twilight
+// 0: Daylight, 1: Sunset, 2: Twilight, 3: Storm / High-Wind, 4: Dense Fog
+export type AtmosphereMode = 0 | 1 | 2 | 3 | 4;
 
 export type ProjectCategory = 'ALL' | 'AEROSPACE' | 'AI' | 'SPATIAL';
 
@@ -91,4 +92,51 @@ export interface FlightProfileConfig {
   yaw: number;
   tilt: number;
   damping: number;
+}
+
+// 1. Inter-Island Payload Delivery Missions
+export type CargoMissionPhase = 'IDLE' | 'AWAITING_PICKUP' | 'IN_TRANSIT';
+
+export interface PayloadMission {
+  id: string;
+  code: string;
+  originStationId: number;
+  destStationId: number;
+  weightKg: number;
+  colorHex: number;
+  speedMultiplier: number; // < 1.0 reduces top cruise speed due to mass
+  dampingMultiplier: number; // < 1.0 increases inertia / momentum drift
+  tiltMultiplier: number; // > 1.0 increases banking & pitch sway under load
+  batteryDrainMultiplier: number; // > 1.0 increases battery consumption rate
+  title: {
+    id: string;
+    en: string;
+  };
+  desc: {
+    id: string;
+    en: string;
+  };
+}
+
+// 2. Dynamic Weather & Physical Turbulence Preset Metadata
+export interface WeatherPresetMetadata {
+  mode: AtmosphereMode;
+  code: string;
+  name: { id: string; en: string };
+  baseWindKt: number;
+  gustKt: number;
+  turbulenceG: number;
+  visibilityPct: number;
+  autoSpotlight: boolean;
+}
+
+// 3. Multi-Segment Waypoint Flight Planner
+export interface FlightPlanWaypoint {
+  id: string;
+  stationId: number | null;
+  label: string;
+  x: number;
+  z: number;
+  cruiseAlt: number; // Target altitude in meters (-15m to +130m)
+  speedPct: number; // Segment cruise speed percentage (40% to 150%)
 }

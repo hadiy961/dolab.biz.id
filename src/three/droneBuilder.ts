@@ -17,6 +17,9 @@ export interface DroneBuildResult {
   droneBlurDiscs: THREE.Mesh[];
   downwashRingMesh: THREE.Mesh;
   droneLandingSpotLight: THREE.SpotLight;
+  navSpotlightCone: THREE.Mesh<THREE.ConeGeometry, THREE.MeshBasicMaterial>;
+  cargoPodGroup: THREE.Group;
+  cargoPodAccentMat: THREE.MeshStandardMaterial;
   groundTargetGroup: THREE.Group;
   altitudeLaserLine: THREE.Line;
   contrailLeftLine: THREE.Line;
@@ -72,7 +75,6 @@ export function buildAeroSondeDrone(
   canopyDome.position.set(0, 0.18, -0.15);
   droneGroup.add(canopyDome);
 
-  // V-Tail Stabilizer Fins
   [-1, 1].forEach((side) => {
     const fin = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.42, 0.48), droneHullMaterial);
     fin.position.set(side * 0.36, 0.28, 0.72);
@@ -80,7 +82,6 @@ export function buildAeroSondeDrone(
     droneGroup.add(fin);
   });
 
-  // Landing Skids
   [-0.58, 0.58].forEach((sx) => {
     const skidBar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.45, 8), carbonMat);
     skidBar.rotation.x = Math.PI / 2;
@@ -92,7 +93,42 @@ export function buildAeroSondeDrone(
     droneGroup.add(skidBar, strutF, strutR);
   });
 
-  // 2. Stabilized 3-Axis Front Camera Gimbal
+  // 1B. Under-Slung Magnetic Payload Pod (Visible during Cargo Transit)
+  const cargoPodGroup = new THREE.Group();
+  cargoPodGroup.position.set(0, -0.58, 0);
+  const cargoPodAccentMat = new THREE.MeshStandardMaterial({
+    color: 0xf59e0b,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 0.75,
+    roughness: 0.2,
+    metalness: 0.5,
+  });
+  const podCore = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.92, 12), carbonMat);
+  podCore.rotation.x = Math.PI / 2;
+  podCore.castShadow = true;
+
+  const podRingFront = new THREE.Mesh(
+    new THREE.TorusGeometry(0.29, 0.045, 10, 20),
+    cargoPodAccentMat
+  );
+  podRingFront.position.z = -0.26;
+  const podRingRear = podRingFront.clone();
+  podRingRear.position.z = 0.26;
+
+  const podBeacon = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 12), cargoPodAccentMat);
+  podBeacon.position.set(0, -0.26, 0);
+
+  [-0.24, 0.24].forEach((cx) => {
+    const clampArm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.36, 0.08), carbonMat);
+    clampArm.position.set(cx, 0.24, 0);
+    cargoPodGroup.add(clampArm);
+  });
+
+  cargoPodGroup.add(podCore, podRingFront, podRingRear, podBeacon);
+  cargoPodGroup.visible = false;
+  droneGroup.add(cargoPodGroup);
+
+  // 2. Stabilized 3-Axis Front Camera Gimbal & Volumetric Spotlight
   const gimbalGroup = new THREE.Group();
   gimbalGroup.position.set(0, -0.2, -0.92);
   const gimbalSphere = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), carbonMat);
@@ -105,12 +141,27 @@ export function buildAeroSondeDrone(
   gimbalGroup.add(gimbalSphere, lensRing);
   droneGroup.add(gimbalGroup);
 
-  // Underbelly Landing Spotlight
-  const droneLandingSpotLight = new THREE.SpotLight(0xe0f2fe, 1.2, 32, Math.PI / 5, 0.5, 1.2);
-  droneLandingSpotLight.position.set(0, -0.3, 0);
-  droneLandingSpotLight.target.position.set(0, -12, 0);
-  droneGroup.add(droneLandingSpotLight);
-  droneGroup.add(droneLandingSpotLight.target);
+  const droneLandingSpotLight = new THREE.SpotLight(0xe0f2fe, 1.2, 46, Math.PI / 4.2, 0.55, 1.1);
+  droneLandingSpotLight.position.set(0, -0.28, -0.45);
+  droneLandingSpotLight.target.position.set(0, -14, -8.5);
+  droneGroup.add(droneLandingSpotLight, droneLandingSpotLight.target);
+
+  const coneGeo = new THREE.ConeGeometry(4.2, 15.0, 24, 1, true);
+  coneGeo.translate(0, -7.5, 0);
+  const navSpotlightCone = new THREE.Mesh(
+    coneGeo,
+    new THREE.MeshBasicMaterial({
+      color: 0xbae6fd,
+      transparent: true,
+      opacity: 0.0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  navSpotlightCone.position.set(0, -0.25, -0.65);
+  navSpotlightCone.rotation.x = -0.52;
+  navSpotlightCone.visible = false;
+  droneGroup.add(navSpotlightCone);
 
   // 3. Four Carbon Arms, Ducted Shrouds, Brushless Motors & Spinning Propellers
   const armCoords = [
@@ -177,7 +228,7 @@ export function buildAeroSondeDrone(
     droneBlurDiscs.push(blurDisc);
   });
 
-  // 4. Downwash Air-Vortex Ring
+  // 4. Downwash Air-Vortex Ring & Ground Target Reticle
   const downwashRingMesh = new THREE.Mesh(
     new THREE.RingGeometry(0.85, 2.25, 36),
     new THREE.MeshBasicMaterial({
@@ -191,7 +242,6 @@ export function buildAeroSondeDrone(
   downwashRingMesh.rotation.x = -Math.PI / 2;
   scene.add(downwashRingMesh);
 
-  // 5. Ground Target Projection Reticle & Vertical Laser Altimeter
   const groundTargetGroup = new THREE.Group();
   const targetOuter = new THREE.Mesh(
     new THREE.RingGeometry(0.65, 0.78, 32),
@@ -218,12 +268,11 @@ export function buildAeroSondeDrone(
   groundTargetGroup.add(targetOuter, targetCross);
   scene.add(groundTargetGroup);
 
-  const laserGeo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, -10, 0),
-  ]);
   const altitudeLaserLine = new THREE.Line(
-    laserGeo,
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, -10, 0),
+    ]),
     new THREE.LineDashedMaterial({
       color: 0x38bdf8,
       dashSize: 0.35,
@@ -235,7 +284,7 @@ export function buildAeroSondeDrone(
   altitudeLaserLine.computeLineDistances();
   scene.add(altitudeLaserLine);
 
-  // 6. Wingtip Contrail Lines
+  // 5. Wingtip Contrail Lines & V-Formation Wingman Swarm
   const contrailLeftHistory: THREE.Vector3[] = [];
   const contrailRightHistory: THREE.Vector3[] = [];
   for (let i = 0; i < CONTRAIL_POINTS; i++) {
@@ -260,7 +309,6 @@ export function buildAeroSondeDrone(
   droneGroup.position.copy(initialPos);
   scene.add(droneGroup);
 
-  // 7. V-Formation Wingman Swarm Drones
   const wingmanDrones: WingmanDroneHandle[] = [];
   const wingMat = new THREE.MeshStandardMaterial({
     color: 0x38bdf8,
@@ -303,6 +351,9 @@ export function buildAeroSondeDrone(
     droneBlurDiscs,
     downwashRingMesh,
     droneLandingSpotLight,
+    navSpotlightCone,
+    cargoPodGroup,
+    cargoPodAccentMat,
     groundTargetGroup,
     altitudeLaserLine,
     contrailLeftLine,

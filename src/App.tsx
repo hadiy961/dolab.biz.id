@@ -17,6 +17,7 @@ export const App: React.FC = () => {
   const altitudeRef = useRef<HTMLSpanElement>(null);
   const speedRef = useRef<HTMLSpanElement>(null);
   const batteryRef = useRef<HTMLSpanElement>(null);
+  const windRef = useRef<HTMLSpanElement>(null);
   const headingRef = useRef<HTMLSpanElement>(null);
   const stationDistanceRef = useRef<HTMLSpanElement>(null);
   const radarCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -31,6 +32,7 @@ export const App: React.FC = () => {
       altitudeEl: altitudeRef.current,
       speedEl: speedRef.current,
       batteryEl: batteryRef.current,
+      windEl: windRef.current,
       headingEl: headingRef.current,
       stationDistanceEl: stationDistanceRef.current,
       radarCanvas: radarCanvasRef.current,
@@ -51,7 +53,10 @@ export const App: React.FC = () => {
       <BootScreen />
 
       {/* 2. WebGL 3D Canvas Container */}
-      <div ref={webglContainerRef} className="fixed inset-0 w-full h-full z-[1]" />
+      <div
+        ref={webglContainerRef}
+        className="fixed inset-0 w-full h-full z-[1]"
+      />
 
       {/* 2B. 3D Spatial Floating Waypoint Markers */}
       <div
@@ -65,6 +70,7 @@ export const App: React.FC = () => {
           altitudeRef={altitudeRef}
           speedRef={speedRef}
           batteryRef={batteryRef}
+          windRef={windRef}
         />
 
         {/* Center Toast Notification */}
@@ -76,7 +82,7 @@ export const App: React.FC = () => {
           {toastMessage || 'SYSTEM READY'}
         </div>
 
-        {/* Middle Area: Bottom-Left Radar + Right Collapsible Station Drawer */}
+        {/* Middle Area: Bottom-Left Radar & Flight Planner + Right Collapsible Station Drawer */}
         <div className="flex-1 flex items-end md:items-center justify-between my-2 relative overflow-hidden">
           <RadarWidget
             radarCanvasRef={radarCanvasRef}

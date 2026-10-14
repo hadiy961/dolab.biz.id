@@ -1,9 +1,9 @@
 {
   "name": "hadiyatna-sky-archipelago-lab",
   "private": true,
-  "version": "4.2.0",
+  "version": "4.6.0",
   "type": "module",
-  "description": "Hadiyatna — 10-Island Sky Archipelago Research Lab & 3D Drone Portfolio (React + TypeScript + Three.js + Zustand + Tailwind CSS)",
+  "description": "Hadiyatna — Modular 10-Island Sky Archipelago Research Lab & 3D Drone Portfolio with Payload Delivery, Dynamic Weather & Waypoint Flight Planner (React + TypeScript + Three.js + Zustand + Tailwind CSS)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

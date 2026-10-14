@@ -1,6 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { PROJECT_CASE_STUDIES } from '../../data/projects';
+import { PROJECT_CASE_STUDIES } from '../../data/portfolioContent';
 import { useLabStore } from '../../store/useLabStore';
 
 export const ProjectModal: React.FC = () => {
