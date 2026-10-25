@@ -57,3 +57,40 @@ src/
         ├── SnapshotModal.tsx                 # Aerial recon photo preview & PNG download
         └── TerminalModal.tsx                 # CV dossier download & AERO-OS CLI shell
 ```
+
+## Deploy (image → registry → manage_56)
+
+Development native di mesin sendiri; produksi menjalankan image nginx self-contained dari Docker Hub.
+Source tidak pernah ada di server produksi — yang tinggal di sana cuma file compose + image.
+
+```sh
+npm ci && npm run dev      # dev server + HMR (localhost:5173)
+./deploy/deploy.sh status            # apa yang jalan di prod + probe publik
+./deploy/deploy.sh preview           # dispatch CI -> tarik :preview -> buka di 127.0.0.1
+./deploy/deploy.sh preview --local   # build di mesin ini (butuh Docker, tanpa gh)
+./deploy/deploy.sh publish           # dispatch CI -> push :preview, prod tidak disentuh
+./deploy/deploy.sh use <tag>         # ganti tag prod (stable|beta|preview|sha-xxx|1.0.0-stable)
+./deploy/deploy.sh release v1.0.0-stable   # tag + push -> CI build & rilis
+./deploy/deploy.sh local             # build+push darurat tanpa CI
+```
+
+Skrip ditulis POSIX `sh`, jadi jalan di Linux, macOS, dan Windows lewat Git Bash/WSL.
+Yang wajib ada di PATH: `docker`; `gh` untuk perintah yang memanggil CI; `ssh`/`scp` untuk perintah prod.
+
+| Pemicu | Image Docker Hub | GitHub |
+|---|---|---|
+| `./deploy/deploy.sh preview` (manual) | `:preview` | tidak ada rilis |
+| `./deploy/deploy.sh preview --local` | hanya lokal, tidak di-push | tidak ada rilis |
+| tag `v*-beta*` | `:beta`, `:<versi>`, `:sha` | prerelease |
+| tag `v*-stable` | `:stable`, `:latest`, `:<versi>`, `:<major>.<minor>`, `:sha` | release (latest) |
+
+Commit ke `main` tidak memicu build apa pun: Actions hanya jalan saat skrip ini memanggilnya atau
+saat tag rilis di-push. Produksi mengikuti `:stable` (`pull_policy: always`).
+
+| Objek | Nilai |
+|---|---|
+| Build host | dev126 (`/home/hadiyatna/project/dolab.biz.id`) — tanpa container |
+| Prod host | manage_56, compose di `/data/web/dolab-web/` |
+| Container | `dolab-web`, publish `0.0.0.0:3001 -> 80`, `restart: unless-stopped` |
+| Tunnel | `62130f66-9651-46da-91f6-7ee0b18c8bb5`, ingress `dolab.biz.id -> http://100.126.95.52:3001` |
+| DNS | `dolab.biz.id` → CNAME tunnel tersebut (proxied) |

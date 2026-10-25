@@ -1,0 +1,123 @@
+name: release
+
+# Channel:
+#   push ke main            -> image :preview + :sha-<sha>      (tanpa rilis GitHub)
+#   tag v*-beta*            -> image :beta + :<versi> + :sha     (prerelease)
+#   tag v*-stable           -> image :stable + :latest + :<versi> + :sha (release)
+#
+# `preview` = build terakhir dari main, sekali pakai untuk melihat hasil.
+# Bukan environment development: image ini nol source dan nol dev server.
+# Image yang dipakai produksi memakai :stable.
+
+on:
+  # Build TIDAK lagi dipicu tiap commit ke main. Dijalankan manual dari
+  # ./deploy.sh preview|publish (gh workflow run) atau otomatis saat tag rilis.
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "preview = build main jadi :preview, beta = build main jadi :beta"
+        type: choice
+        options: [preview, beta]
+        default: preview
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  IMAGE: hadiyatna9/dolab-web
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Docker Hub butuh token. Kalau belum di-set, image TIDAK dipublikasikan
+      # dan job ini muncul sebagai skipped dengan warning — bukan gagal senyap
+      # dan bukan "hijau" padahal tidak ada yang di-push.
+      - name: Cek kredensial Docker Hub
+        id: creds
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::DOCKERHUB_TOKEN belum di-set; image tidak dipublikasikan."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login Docker Hub
+        if: steps.creds.outputs.ok == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Hitung tag image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=preview,enable=${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'preview' }}
+            type=raw,value=beta,enable=${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'beta') || (startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-beta')) }}
+            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-stable') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-stable') }}
+            type=sha,format=short,prefix=sha-,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-stable') }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          # Dua event yang tersisa (dispatch & tag rilis) dua-duanya boleh
+          # publish; yang menentukan hanyalah ada/tidaknya kredensial.
+          push: ${{ steps.creds.outputs.ok == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Ringkasan
+        run: |
+          {
+            echo "### Image"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            if [ "${{ steps.creds.outputs.ok }}" != "true" ]; then
+              echo "> Token Docker Hub belum ada: image hanya di-build, tidak di-push."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publikasikan rilis GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=(--title "$GITHUB_REF_NAME" --generate-notes)
+          case "$GITHUB_REF_NAME" in
+            *-beta*)   args+=(--prerelease) ;;
+            *-stable*) args+=(--latest) ;;
+          esac
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Rilis $GITHUB_REF_NAME sudah ada; tidak dibuat ulang."
+          else
+            gh release create "$GITHUB_REF_NAME" "${args[@]}"
+          fi

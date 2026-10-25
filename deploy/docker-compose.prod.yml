@@ -1,0 +1,23 @@
+# Compose PRODUCTION (manage_56). Image self-contained: tidak ada bind mount,
+# tidak ada build di prod — yang jalan persis yang di-push dari registry.
+#
+# Deploy:   TAG=stable docker compose -f deploy/docker-compose.prod.yml up -d
+# Rollback: TAG=<tag-lama> docker compose ... up -d
+#
+# Port 3001 dipertahankan karena ingress tunnel dolab.biz.id menunjuk ke
+# http://100.126.95.52:3001, jadi cutover tidak perlu menyentuh Cloudflare.
+services:
+  dolab-web:
+    image: hadiyatna9/dolab-web:${TAG:-stable}
+    # pull_policy always: prod mengikuti channel (default :stable). Untuk pin
+    # ke satu rilis, jalankan dengan TAG=sha-<short> atau TAG=1.0.0-stable.
+    pull_policy: always
+    container_name: dolab-web
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
